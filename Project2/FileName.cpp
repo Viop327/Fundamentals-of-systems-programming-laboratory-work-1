@@ -13,6 +13,11 @@ TCHAR WinName[] = _T("MainFrame");
 #define ID_HELP_EXIT  40013
 #define ID_EXIT_TOP   40014
 
+// Global cursors / state
+HCURSOR g_hArrowCursor = NULL;
+HCURSOR g_hWaitCursor = NULL;
+bool g_busy = false;
+
 int APIENTRY _tWinMain(
     HINSTANCE This, // Дескриптор поточного застосунку
     HINSTANCE Prev, // У сучасних системах завжди 0
@@ -25,6 +30,10 @@ int APIENTRY _tWinMain(
     HMENU hResultMenu, hHelpMenu, hMenu; // Дескриптори пунктів меню
     HACCEL hAccel = NULL;
 
+    // Load cursors to satisfy "arrow and small hourglass" requirement
+    g_hArrowCursor = LoadCursor(NULL, IDC_ARROW);
+    g_hWaitCursor  = LoadCursor(NULL, IDC_WAIT);
+
     // Визначити клас вікна
     ZeroMemory(&wc, sizeof(wc));
     wc.hInstance = This;
@@ -32,7 +41,7 @@ int APIENTRY _tWinMain(
     wc.lpfnWndProc = WndProc;                      // Функція вікна
     wc.style = CS_HREDRAW | CS_VREDRAW;            // Стиль вікна
     wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);    // піктограма застосунку за умовчанням
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);      // стандартна стрілка
+    wc.hCursor = g_hArrowCursor;                   // стандартна стрілка (class default)
     wc.lpszMenuName = NULL;                        // Немає меню класу
     wc.cbClsExtra = 0;
     wc.cbWndExtra = 0;
@@ -89,11 +98,17 @@ int APIENTRY _tWinMain(
     };
     hAccel = CreateAcceleratorTable(accel, sizeof(accel) / sizeof(ACCEL));
 
-    // --- Змінено тут: показати вікно (не ховати) та застосувати анімацію AW_BLEND ---
-    ShowWindow(hWnd, SW_SHOW);                 // раніше було SW_HIDE — саме це заважало вікну відкриватися
-    UpdateWindow(hWnd);
-    // плавне проявлення (AW_BLEND) — потребує user32 (за замовчуванням лінкується)
+    // Requirement: ShowWindow call must be with "hidden" state
+    ShowWindow(hWnd, SW_HIDE);    // kept as required
+
+    // Use AnimateWindow with AW_BLEND to show the window smoothly (satisfies AW_BLEND requirement)
+    // AnimateWindow without AW_HIDE shows the window even if it was hidden.
     AnimateWindow(hWnd, 300, AW_BLEND);
+
+    // Ensure the window has focus so accelerators work
+    UpdateWindow(hWnd);
+    SetForegroundWindow(hWnd);
+    SetFocus(hWnd);
 
     // Цикл обробки повідомлень з підтримкою акселераторів
     while (GetMessage(&msg, NULL, 0, 0))
@@ -119,45 +134,63 @@ LRESULT CALLBACK WndProc(
 {
     switch (message)
     {
+    case WM_SETCURSOR:
+        // Provide arrow normally, hourglass when busy
+        if (g_busy)
+        {
+            SetCursor(g_hWaitCursor);
+            return TRUE; // handled
+        }
+        // let DefWindowProc set the normal cursor (class cursor)
+        break;
+
     case WM_COMMAND:
     {
         int wmId = LOWORD(wParam);
         switch (wmId)
         {
         case ID_RESULT_EXIT:
-            // показати пісочний годинник, а потім анімовано сховати вікно й вийти
-            SetCursor(LoadCursor(NULL, IDC_WAIT));
+            // show wait cursor, animate hide, then quit
+            g_busy = true;
+            SetCursor(g_hWaitCursor);
             UpdateWindow(hWnd);
             AnimateWindow(hWnd, 300, AW_BLEND | AW_HIDE);
             PostQuitMessage(0);
-            break;
+            g_busy = false;
+            return 0;
 
         case ID_HELP_AUTHOR:
             // коротке повідомлення про автора
-            SetCursor(LoadCursor(NULL, IDC_WAIT));
-            MessageBox(hWnd, _T("Автор програми: Ваше ім'я"), _T("Автор"), MB_OK | MB_ICONINFORMATION);
-            SetCursor(LoadCursor(NULL, IDC_ARROW));
-            break;
+            g_busy = true;
+            SetCursor(g_hWaitCursor);
+            MessageBox(hWnd, _T("Автор програми: Андрій Бартошек"), _T("Автор"), MB_OK | MB_ICONINFORMATION);
+            g_busy = false;
+            SetCursor(g_hArrowCursor);
+            return 0;
 
         case ID_HELP_REQ:
-            SetCursor(LoadCursor(NULL, IDC_WAIT));
+            g_busy = true;
+            SetCursor(g_hWaitCursor);
             MessageBox(hWnd, _T("Вимоги до програми:\n- Windows\n- Базова конфігурація"), _T("Вимоги"), MB_OK | MB_ICONINFORMATION);
-            SetCursor(LoadCursor(NULL, IDC_ARROW));
-            break;
+            g_busy = false;
+            SetCursor(g_hArrowCursor);
+            return 0;
 
         case ID_HELP_EXIT:
-            // вихід з програми з допомогою меню Довідка
-            SetCursor(LoadCursor(NULL, IDC_WAIT));
+            g_busy = true;
+            SetCursor(g_hWaitCursor);
             AnimateWindow(hWnd, 300, AW_BLEND | AW_HIDE);
             PostQuitMessage(0);
-            break;
+            g_busy = false;
+            return 0;
 
         case ID_EXIT_TOP:
-            // верхній пункт "Вихід з програми"
-            SetCursor(LoadCursor(NULL, IDC_WAIT));
+            g_busy = true;
+            SetCursor(g_hWaitCursor);
             AnimateWindow(hWnd, 300, AW_BLEND | AW_HIDE);
             PostQuitMessage(0);
-            break;
+            g_busy = false;
+            return 0;
 
         default:
             return DefWindowProc(hWnd, message, wParam, lParam);
